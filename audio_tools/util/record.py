@@ -43,3 +43,30 @@ def record(stream: ati.PacketStream, duration: float) -> tuple[int, np.ndarray]:
 
     data = np.concatenate(pkts["data"], axis=0)  # Extract audio samples only
     return stream.sample_rate, data
+
+
+def _parse_args(args: list[str] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Record a fixed-size audio stream from a PacketServer."
+    )
+    parser.add_argument("ip", type=str, help="Source IP address")
+    parser.add_argument("port", type=int, help="Source port")
+    parser.add_argument("length", type=float, help="Acquisition time [unit: second]")
+    parser.add_argument("file", type=str, help=".WAV file to store audio stream")
+
+    args = parser.parse_args(args)
+    args.file = plib.Path(args.file).expanduser().resolve()
+    assert args.length > 0, "Non-negative length expected."
+    return args
+
+
+if __name__ == "__main__":
+    args = _parse_args()
+
+    cl = atn.PacketClient(host=args.host, port=args.port)
+    fs, data = record(stream=cl, duration=args.length)
+    cl.stop()
+    cl.clear()
+
+    args.file.parent.mkdir(parents=True, exist_ok=True)
+    siw.write(filename=str(args.file), rate=fs, data=data)
