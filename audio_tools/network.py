@@ -4,6 +4,7 @@ import itertools
 import queue
 import socket
 import threading
+import time
 
 import numpy as np
 
@@ -232,27 +233,109 @@ class PacketClient(ati.PacketStream):
             PacketServer port.
         """
         super().__init__(dtype=None, sample_rate=None)  # not yet known
-        # TODO
-        self._queue = queue.Queue()
+        self._host = host
+        self._port = port
+
+        self._thread = None
+        self._pkt_q = queue.Queue()
+        self._active = threading.Event()  # thread start/stop synchronization
 
     def start(self):
-        # TODO
-        raise NotImplementedError
+        if self.active():
+            pass
+        else:
+            conn = socket.socket()
+            conn.connect((self._host, self._port))
+
+            self._active.set()
+            self._thread = PacketClient._NetworkStreamer(self, conn)
+            self._thread.start()
+
+        # PacketStream interface constraint: stall until dtype/sample_rate known
+        while any([self.dtype is None, self.sample_rate is None]):
+            time.sleep(5e-3)
 
     def stop(self):
-        # TODO
-        raise NotImplementedError
+        self._active.clear()  # gracefully terminate acquisition
 
     def get(self) -> np.ndarray:
-        return self._queue.get()
+        return self._pkt_q.get()
 
     def clear(self):
         try:
             while True:
-                self._queue.get(block=False)
-                self._queue.task_done()
+                self._pkt_q.get(block=False)
+                self._pkt_q.task_done()
         except queue.Empty:
             pass
 
     def __len__(self) -> int:
-        return self._queue.qsize()
+        return self._pkt_q.qsize()
+
+    def active(self) -> bool:
+        return self._active.is_set()
+
+    class _NetworkStreamer(threading.Thread):
+        def __init__(self, client: "PacketClient", skt: socket.socket):
+            super().__init__()
+            self._client = client
+            self._skt = skt
+
+        def run(self):
+            try:
+                self._decode_header()
+                self._stream_audio()
+            except Exception:
+                pass
+            finally:
+                self._cleanup()
+
+        def _decode_header(self):
+            data = b""
+            N_left = lambda: 4 - len(data)
+            while N_left() > 0:
+                data += self._skt.recv(N_left())
+            N_byte = int.from_bytes(data, byteorder="big", signed=False)
+
+            data = b""
+            N_left = lambda: N_byte - len(data)
+            while N_left() > 0:
+                data += self._skt.recv(N_left())
+            metadata = json.loads(data)
+
+            # Set stream properties
+            dtype = np.dtype(list(map(tuple, metadata["dtype_descr"])))
+            self._client._dtype = dtype
+            self._client._sample_rate = metadata["sample_rate"]
+
+        def _stream_audio(self):
+            skt_alive = True
+            while self._client.active() and skt_alive:
+                pkt = self._channel2pkt()
+                if pkt is not None:
+                    self._client._pkt_q.put(pkt.copy())
+                else:
+                    # connection closed -> stop acquisition
+                    skt_alive = False
+
+        def _channel2pkt(self) -> np.ndarray:
+            # Obtain a full packet from the channel, or None if infeasible.
+            data = b""
+            N_left = lambda: self._client.dtype.itemsize - len(data)
+            while True:
+                d = self._skt.recv(N_left())
+                data += d
+                if N_left() == 0:
+                    pkt = np.frombuffer(data, dtype=self._client.dtype)
+                    return pkt
+                elif len(d) == 0:
+                    return None
+
+        def _cleanup(self):
+            self._skt.close()
+
+            # reset state to that after PacketClient.__init__().
+            self._client._active.clear()
+            self._client._dtype = None
+            self._client._sample_rate = None
+            self._client._thread = None
