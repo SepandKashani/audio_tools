@@ -184,7 +184,33 @@ class PacketServer(ati.PacketStream):
             self._skt.close()
 
     class _NetworkListener(threading.Thread):
-        pass
+        def __init__(self, srvr: "PacketServer"):
+            super().__init__()
+            self._srvr = srvr
+
+        def run(self):
+            with socket.socket() as skt:
+                skt.bind(("", self._srvr._port))
+                skt.listen(5)
+
+                # Activate non-blocking mode. (Required to avoid socket.accept() freeze.)
+                # A conservative timeout period is chosen to avoid wasting resources here.
+                pkt_size, *_ = self._srvr.dtype["data"].shape  # smpl/pkt
+                pkt_rate = self._srvr.sample_rate / pkt_size  # pkt/s
+                skt.settimeout(20 / pkt_rate)
+
+                while self._srvr.active():
+                    try:
+                        conn, addr = skt.accept()
+                        with self._srvr._q_lck:
+                            cid = next(self._srvr._cid)
+                            t = PacketServer._NetworkStreamer(self._srvr, conn, cid)
+
+                            self._srvr._pkt_q[cid] = queue.Queue()
+                            self._srvr._thread[cid] = t
+                            t.start()
+                    except OSError:
+                        pass  # skt.accept() just timed-out -> not a problem.
 
 
 class PacketClient(ati.PacketStream):
