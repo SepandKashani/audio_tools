@@ -97,7 +97,25 @@ class PacketServer(ati.PacketStream):
         return self._active.is_set()
 
     class _LocalStreamer(threading.Thread):
-        pass
+        def __init__(self, srvr: "PacketServer"):
+            super().__init__()
+            self._srvr = srvr
+
+        def run(self):
+            pkt_size, *_ = self._srvr.dtype["data"].shape  # smpl/pkt
+            pkt_rate = self._srvr.sample_rate / pkt_size  # pkt/s
+            stream = self._srvr._stream
+
+            while self._srvr.active():
+                if len(stream) > 0:  # required to avoid PacketStream.get()'s blocking behaviour.
+                    pkt = stream.get()
+                    for q in self._srvr._pkt_q.values():
+                        # Note: if no client available, then stream packets are 'lost'. This is
+                        # intended behaviour.
+                        q.put(pkt)
+                else:
+                    # No data available at source, but new packet imminent -> stall briefly.
+                    time.sleep(0.5 / pkt_rate)
 
     class _NetworkStreamer(threading.Thread):
         def __init__(self, srvr: "PacketServer", skt: socket.socket, cid: int):
