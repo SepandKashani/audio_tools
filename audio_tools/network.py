@@ -1,4 +1,7 @@
+import io
+import json
 import queue
+import socket
 import threading
 
 import numpy as np
@@ -96,10 +99,73 @@ class PacketServer(ati.PacketStream):
     class _LocalStreamer(threading.Thread):
         pass
 
-    class _NetworkListener(threading.Thread):
-        pass
-
     class _NetworkStreamer(threading.Thread):
+        def __init__(self, srvr: "PacketServer", skt: socket.socket, cid: int):
+            super().__init__()
+            self._srvr = srvr
+            self._skt = skt
+            self._cid = cid
+
+        def run(self):
+            try:
+                self._send_header()
+                self._stream_audio()
+            except Exception:
+                pass
+            finally:
+                self._cleanup()
+
+        def _send_header(self):
+            # Transmit all metadata required for PacketClient to decode audio packets. The header is
+            # JSON-encoded (utf-8), prepended with a >u4 describing its length in bytes.
+            metadata = json.dumps(
+                {
+                    "sample_rate": self._srvr.sample_rate,
+                    "dtype_descr": self._srvr.dtype.descr,
+                }
+            ).encode()
+            header = len(metadata).to_bytes(4, byteorder="big", signed=False) + metadata
+            self._skt.sendall(header)
+
+        def _stream_audio(self):
+            q = self._srvr._pkt_q[self._cid]
+            pkt_size, *_ = self._srvr.dtype["data"].shape  # smpl/pkt
+            pkt_rate = self._srvr.sample_rate / pkt_size  # pkt/s
+
+            skt_alive = True
+            while self._srvr.active() and skt_alive:
+                try:
+                    pkt = q.get(timeout=10 / pkt_rate)
+                    q.task_done()
+                    self._skt.sendall(bytes(pkt))
+                except queue.Empty:
+                    # No packet was in the queue despite waiting significantly longer than the
+                    # packet arrival rate. Delay reason unknown, but the thread should still run
+                    # because PacketClient.get() is designed to block until a packet is available.
+                    # The thread should only be taken down if:
+                    # * PacketServer.stop() is called;
+                    # * the socket is broken/closed. (Ex: PacketClient.stop() called.)
+                    pass
+                except OSError:
+                    # Something went wrong with sendall(). Whatever the cause, the socket is no
+                    # longer in a useable state -> end connection.
+                    skt_alive = False
+
+        def _cleanup(self):  # cleanup connection + shared resources
+            with self._srvr._q_lck:
+                self._srvr._thread.pop(self._cid, None)
+
+                q = self._srvr._pkt_q.pop(self._cid, None)
+                if q is not None:
+                    try:
+                        while True:
+                            q.get(block=False)
+                            q.task_done()
+                    except queue.Empty:
+                        pass
+            self._skt.close()
+
+    class _NetworkListener(threading.Thread):
         pass
 
 
