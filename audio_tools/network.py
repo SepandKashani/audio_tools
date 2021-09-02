@@ -1,5 +1,6 @@
 import io
 import json
+import itertools
 import queue
 import socket
 import threading
@@ -49,7 +50,8 @@ class PacketServer(ati.PacketStream):
 
         self._thread: dict[int, threading.Thread] = {}
         self._pkt_q: dict[int, queue.Queue] = {}
-        self._q_lck = threading.Lock()  # thread synchronization to modify [_thread | _pkt_q]
+        self._cid = itertools.count(start=2)
+        self._q_lck = threading.Lock()  # thread synchronization to modify [_thread, _pkt_q, _cid]
         self._active = threading.Event()  # thread start/stop notification
 
     def start(self):
@@ -62,27 +64,29 @@ class PacketServer(ati.PacketStream):
             self._sample_rate = self._stream.sample_rate
             self._active.set()
 
-            self._thread = {
+            # create/launch non-NetworkStreamer threads
+            self._thread |= {
                 0: PacketServer._LocalStreamer(self),
                 1: PacketServer._NetworkListener(self),
             }
-            for t in self._thread.values():
-                t.start()
+            for t_id in {0, 1}:
+                self._thread[t_id].start()
 
     def stop(self):
         self._stream.stop()  # stop acquisition
         self._stream.clear()
 
         self._active.clear()  # gracefully terminate threads
-        for t in self._thread.values():
-            t.join()
-        self._thread = dict()
-
-        for q in self._pkt_q.values():  # and dispose of any lingering state.
-            while not q.empty():
-                q.get()
-                q.task_done()
-        self._pkt_q = dict()
+        pkt_size, *_ = self.dtype["data"].shape  # smpl/pkt
+        pkt_rate = self.sample_rate / pkt_size  # pkt/s
+        for t in list(self._thread.values()):  # guarantees static dict-view.
+            # The only threads which may hang are NetworkStreamers. (See Notes above.)
+            # Wait a reasonable amount of time for most lingering packets to be sent.
+            t.join(timeout=30 / pkt_rate)
+        with self._q_lck:  # Discard all state related to dead threads (if any).
+            for t_id in [_[0] for _ in self._thread.items() if not _[1].is_alive()]:
+                self._thread.pop(t_id, None)
+                self._pkt_q.pop(t_id, None)
 
     def get(self) -> np.ndarray:
         raise NotImplementedError("Operation not supported.")
