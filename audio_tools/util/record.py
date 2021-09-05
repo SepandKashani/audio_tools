@@ -1,14 +1,14 @@
 import argparse
-import pathlib as plib
+import os
+import os.path as osp
 
 import numpy as np
-import scipy.io.wavfile as siw
 
 import audio_tools.interface as ati
 import audio_tools.network as atn
 
 
-def record(stream: ati.PacketStream, duration: float) -> tuple[int, np.ndarray]:
+def record(stream: ati.PacketStream, duration: float) -> "tuple[int, np.ndarray]":
     """
     Record a fixed-size audio stream from a Packet source.
 
@@ -45,17 +45,24 @@ def record(stream: ati.PacketStream, duration: float) -> tuple[int, np.ndarray]:
     return stream.sample_rate, data
 
 
-def _parse_args(args: list[str] = None) -> argparse.Namespace:
+def _parse_args(args: "list[str]" = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Record a fixed-size audio stream from a PacketServer."
     )
     parser.add_argument("ip", type=str, help="Source IP address")
     parser.add_argument("port", type=int, help="Source port")
     parser.add_argument("length", type=float, help="Acquisition time [unit: second]")
-    parser.add_argument("file", type=str, help=".WAV file to store audio stream")
+    parser.add_argument("file", type=str, help="File to store audio stream")
+    parser.add_argument(
+        "--format",
+        type=str,
+        help="Output file format. Using 'wav' requires SciPy.",
+        choices={"wav", "npz"},
+        default="npz",
+    )
 
     args = parser.parse_args(args)
-    args.file = plib.Path(args.file).expanduser().resolve()
+    args.file = osp.abspath(osp.expanduser(args.file))
     assert args.length > 0, "Non-negative length expected."
     return args
 
@@ -63,10 +70,15 @@ def _parse_args(args: list[str] = None) -> argparse.Namespace:
 if __name__ == "__main__":
     args = _parse_args()
 
-    cl = atn.PacketClient(host=args.host, port=args.port)
+    cl = atn.PacketClient(host=args.ip, port=args.port)
     fs, data = record(stream=cl, duration=args.length)
     cl.stop()
     cl.clear()
 
-    args.file.parent.mkdir(parents=True, exist_ok=True)
-    siw.write(filename=str(args.file), rate=fs, data=data)
+    os.makedirs(osp.dirname(args.file), exist_ok=True)
+    if args.format == "wav":
+        import scipy.io.wavfile as siw
+
+        siw.write(filename=args.file, rate=fs, data=data)
+    else:
+        np.savez(file=args.file, rate=fs, data=data)

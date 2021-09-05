@@ -49,8 +49,8 @@ class PacketServer(ati.PacketStream):
         self._stream = stream
         self._port = port
 
-        self._thread: dict[int, threading.Thread] = {}
-        self._pkt_q: dict[int, queue.Queue] = {}
+        self._thread = {}  # dict[int, threading.Thread]
+        self._pkt_q = {}  # dict[int, queue.Queue]
         self._cid = itertools.count(start=2)
         self._q_lck = threading.Lock()  # thread synchronization to modify [_thread, _pkt_q, _cid]
         self._active = threading.Event()  # thread start/stop notification
@@ -66,10 +66,12 @@ class PacketServer(ati.PacketStream):
             self._active.set()
 
             # create/launch non-NetworkStreamer threads
-            self._thread |= {
-                0: PacketServer._LocalStreamer(self),
-                1: PacketServer._NetworkListener(self),
-            }
+            self._thread.update(
+                {
+                    0: PacketServer._LocalStreamer(self),
+                    1: PacketServer._NetworkListener(self),
+                }
+            )
             for t_id in {0, 1}:
                 self._thread[t_id].start()
 
@@ -301,7 +303,7 @@ class PacketClient(ati.PacketStream):
             N_left = lambda: N_byte - len(data)
             while N_left() > 0:
                 data += self._skt.recv(N_left())
-            metadata = json.loads(data)
+            metadata = json.loads(data.decode())
 
             # Set stream properties
             dtype = np.dtype(list(map(tuple, metadata["dtype_descr"])))

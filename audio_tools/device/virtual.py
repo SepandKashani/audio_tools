@@ -1,6 +1,7 @@
 import time
 
 import numpy as np
+import numpy.random as npr
 
 import audio_tools.interface as ati
 
@@ -27,10 +28,9 @@ class PureToneStream(ati.PacketStream):
         self._fc = fc
 
     def start(self):
-        rng = np.random.default_rng()
         N_sample, N_channel = self.dtype["data"].shape
         self._t = (2 * np.pi * self._fc / self.sample_rate) * np.arange(N_sample)
-        self._phase = rng.uniform(0, 2 * np.pi, size=(N_channel,))
+        self._phase = npr.uniform(0, 2 * np.pi, size=(N_channel,))
         self._id = 0
         self._active = True
         self._time = time.time()  # last sample time
