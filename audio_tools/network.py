@@ -1,6 +1,5 @@
-import io
-import json
 import itertools
+import pickle
 import queue
 import socket
 import threading
@@ -9,6 +8,7 @@ import time
 import numpy as np
 
 import audio_tools.interface as ati
+import audio_tools.util.interop as atui
 
 
 class PacketServer(ati.PacketStream):
@@ -142,13 +142,15 @@ class PacketServer(ati.PacketStream):
 
         def _send_header(self):
             # Transmit all metadata required for PacketClient to decode audio packets. The header is
-            # JSON-encoded (utf-8), prepended with a >u4 describing its length in bytes.
-            metadata = json.dumps(
+            # pickle-encoded, prepended with a >u4 describing its length in bytes. We use pickle in
+            # place of JSON since dtype descriptors are sensitive to the sequence type used.
+            metadata = pickle.dumps(
                 {
                     "sample_rate": self._srvr.sample_rate,
-                    "dtype_descr": self._srvr.dtype.descr,
-                }
-            ).encode()
+                    "dtype_descr": atui.dtype_to_descr(self._srvr.dtype),
+                },
+                protocol=4,
+            )
             header = len(metadata).to_bytes(4, byteorder="big", signed=False) + metadata
             self._skt.sendall(header)
 
@@ -303,11 +305,10 @@ class PacketClient(ati.PacketStream):
             N_left = lambda: N_byte - len(data)
             while N_left() > 0:
                 data += self._skt.recv(N_left())
-            metadata = json.loads(data.decode())
+            metadata = pickle.loads(data)
 
             # Set stream properties
-            dtype = np.dtype(list(map(tuple, metadata["dtype_descr"])))
-            self._client._dtype = dtype
+            self._client._dtype = atui.descr_to_dtype(metadata["dtype_descr"])
             self._client._sample_rate = metadata["sample_rate"]
 
         def _stream_audio(self):
