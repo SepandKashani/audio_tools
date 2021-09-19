@@ -41,10 +41,8 @@ class PyramicStream(ati.PacketStream):
         """
         assert 0 < pkt_size <= 29127, "Parameter[pkt_size] is out of bounds."
         super().__init__(
-            dtype=np.dtype([("id", ">u1"), ("data", "<i2", (pkt_size, 48))]),
-            sample_rate=48000,  # TODO: is "<i2" correct?
-            # @Sahand: [15 -- 8][7 -- 0]
-            # Check ADC spec sheet
+            dtype=np.dtype([("id", ">u1"), ("data", ">i2", (pkt_size, 48))]),
+            sample_rate=48000,
         )
 
         self._pci_offset = pci
