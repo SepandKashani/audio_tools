@@ -124,7 +124,7 @@ class PyramicStream(ati.PacketStream):
             for i, k in enumerate(fields):
                 self._data[k] = np.ndarray(
                     shape=(1,),
-                    dtype=np.dtype(">u4"),  # TODO: wrong dtype? Run C snippet to verify.
+                    dtype=np.dtype(dict(big=">", little="<")[sys.byteorder] + "u4"),
                     buffer=self._pci,
                     offset=r + 4 * i,
                 )
