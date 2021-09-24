@@ -162,6 +162,7 @@ class PyramicStream(ati.PacketStream):
             reg = self._data["REG_BUF_ACTIVE"]
             hw_acquire = lambda: reg[0] > 0x0
             wr_buffers = lambda: {0x0: (None, None), 0x1: (0, 2), 0x2: (1, 0), 0x4: (2, 1)}[reg[0]]
+            id_incr = {(0, 1): 2, (0, 2): 1, (1, 0): 1, (1, 2): 2, (2, 0): 2, (2, 1): 1}
 
             pkt_size, *_ = self._pyramic.dtype["data"].shape  # smpl/pkt
             pkt_rate = self._pyramic.sample_rate / pkt_size  # pkt/s
@@ -178,7 +179,7 @@ class PyramicStream(ati.PacketStream):
                 elif wb == wb_prev:  # no new packet yet -> stall
                     time.sleep(period)
                 else:  # finished acquiring a packet -> provide to user
-                    pkt["id"] += 1
+                    pkt["id"] += id_incr[(wb, wb_prev)]
                     pkt["data"][:] = self._data["BUF"][rb]
                     self._pyramic._pkt_q.put(pkt.copy())
                     wb_prev = wb
