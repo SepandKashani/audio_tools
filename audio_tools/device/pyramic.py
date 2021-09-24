@@ -1,10 +1,10 @@
-import io
 import mmap
+import queue
+import sys
 import threading
 import time
 
 import numpy as np
-import numpy.random as npr
 
 import audio_tools.interface as ati
 
@@ -107,7 +107,7 @@ class PyramicStream(ati.PacketStream):
                 self._cleanup()
 
         def _setup(self):
-            self._mem = io.open("/dev/mem", mode="r+b")
+            self._mem = open("/dev/mem", mode="r+b")
 
             q, r = divmod(self._pyramic._pci_offset, mmap.ALLOCATIONGRANULARITY)
             self._pci = mmap.mmap(
@@ -162,7 +162,7 @@ class PyramicStream(ati.PacketStream):
             reg = self._data["REG_BUF_ACTIVE"]
             hw_acquire = lambda: reg[0] > 0x0
             wr_buffers = lambda: {0x0: (None, None), 0x1: (0, 2), 0x2: (1, 0), 0x4: (2, 1)}[reg[0]]
-            id_incr = {(0, 1): 2, (0, 2): 1, (1, 0): 1, (1, 2): 2, (2, 0): 2, (2, 1): 1}
+            id_incr = {(0, 1): 2, (0, 2): 1, (1, 0): 1, (1, 2): 2, (2, 0): 2, (2, 1): 1}  # (w, w_prev) -> incr
 
             pkt_size, *_ = self._pyramic.dtype["data"].shape  # smpl/pkt
             pkt_rate = self._pyramic.sample_rate / pkt_size  # pkt/s
@@ -187,7 +187,7 @@ class PyramicStream(ati.PacketStream):
         def _cleanup(self):
             # reset state to that after PyramicStream.__init__().
             self._pyramic._active.clear()
-            self._client._thread = None
+            self._pyramic._thread = None
 
             self._data["REG_COMMAND"][0] = 0x2  # STOP
             self._mem.flush()
