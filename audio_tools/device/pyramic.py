@@ -18,7 +18,12 @@ class PyramicStream(ati.PacketStream):
     [1] https://github.com/sahandKashani/Pyramic_v2.git
     """
 
-    def __init__(self, pci: int, rma: int, pkt_size: int):
+    def __init__(
+        self,
+        pci: int = 0xFF20_0000,
+        rma: int = 0x3F80_0000,
+        pkt_size: int = 9600,
+    ):
         """
         Parameters
         ----------
