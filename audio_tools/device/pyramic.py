@@ -20,8 +20,8 @@ class PyramicStream(ati.PacketStream):
 
     def __init__(
         self,
-        pci: int = 0xFF20_0000,
-        rma: int = 0x3F80_0000,
+        pci: int = 0xFF200000,
+        rma: int = 0x3F800000,
         pkt_size: int = 9600,
     ):
         """
@@ -94,7 +94,7 @@ class PyramicStream(ati.PacketStream):
             self._mem = None
             self._pci = None
             self._rma = None
-            self._data = dict[str, np.ndarray]()
+            self._data = {}  # dict[str, np.ndarray]
 
         def run(self):
             try:
