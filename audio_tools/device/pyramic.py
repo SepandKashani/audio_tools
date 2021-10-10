@@ -113,7 +113,8 @@ class PyramicStream(ati.PacketStream):
             self._pci = mmap.mmap(
                 self._mem.fileno(),
                 length=r + 8 * 4,  # 4-byte words (8x)
-                access=mmap.ACCESS_READ | mmap.ACCESS_WRITE,
+                flags=mmap.MAP_SHARED,
+                prot=mmap.PROT_READ | mmap.PROT_WRITE,
                 offset=q * mmap.ALLOCATIONGRANULARITY,
             )
             fields = [
@@ -138,7 +139,8 @@ class PyramicStream(ati.PacketStream):
             self._rma = mmap.mmap(
                 self._mem.fileno(),
                 length=r + 8 * (2 ** 20),  # 8MB region
-                access=mmap.ACCESS_READ,
+                flags=mmap.MAP_SHARED,
+                prot=mmap.PROT_READ,
                 offset=q * mmap.ALLOCATIONGRANULARITY,
             )
             self._data["BUF"] = np.ndarray(
@@ -156,12 +158,10 @@ class PyramicStream(ati.PacketStream):
             self._data["DMA_BUF_1_ADDR"][0] = addr(1)
             self._data["DMA_BUF_2_ADDR"][0] = addr(2)
             self._data["REG_COMMAND"][0] = 0x1  # START
-            self._mem.flush()
 
         def _sample_audio(self):
-            reg = self._data["REG_BUF_ACTIVE"]
-            hw_acquire = lambda: reg[0] > 0x0
-            wr_buffers = lambda: {0x0: (None, None), 0x1: (0, 2), 0x2: (1, 0), 0x4: (2, 1)}[reg[0]]
+            hw_acquire = lambda: self._data["REG_STATUS"][0] > 0x0
+            wr_buffers = lambda: {0x0: (None, None), 0x1: (0, 2), 0x2: (1, 0), 0x4: (2, 1)}[self._data["REG_BUF_ACTIVE"][0]]
             id_incr = {(0, 1): 2, (0, 2): 1, (1, 0): 1, (1, 2): 2, (2, 0): 2, (2, 1): 1}  # (w, w_prev) -> incr
 
             pkt_size, *_ = self._pyramic.dtype["data"].shape  # smpl/pkt
@@ -190,7 +190,6 @@ class PyramicStream(ati.PacketStream):
             self._pyramic._thread = None
 
             self._data["REG_COMMAND"][0] = 0x2  # STOP
-            self._mem.flush()
 
             self._data = dict()
             self._rma.close()
